@@ -5,8 +5,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Basic.fs" />
-    <Compile Include="Patterns.fs" />
+	<Compile Include="ArrayPatterns.fs" />
+    <Compile Include="Game.fs" />
   </ItemGroup>
 
   <ItemGroup>

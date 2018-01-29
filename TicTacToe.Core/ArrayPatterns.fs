@@ -1,6 +1,6 @@
 ﻿namespace TicTacToe.Core
 
-module Patterns =
+module ArrayPatterns =
     let Winning: byte[,] list = [
         Array2D.init 1 5 (fun y x -> 1uy)
         //array2D [|

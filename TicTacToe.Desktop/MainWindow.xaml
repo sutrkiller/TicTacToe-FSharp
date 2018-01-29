@@ -7,6 +7,10 @@
         mc:Ignorable="d"
         Name="MainApplication"
         Title="MainWindow" Height="350" Width="525">
+    
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -19,12 +23,26 @@
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
+        <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0"><Bold Foreground="DeepSkyBlue">Player 1:</Bold> W(0), D(0), L(0) </TextBlock>
         <TextBlock Grid.Row="0" Grid.Column="1" FontWeight="Bold" FontSize="18" VerticalAlignment="Center" Text="{Binding ElementName=MainApplication, Path=Turns, Mode=OneWay}"/>
         <Ellipse Grid.Row="0" Grid.Column="2" VerticalAlignment="Center" Margin="12, 0, 0, 0" Width="14" Height="14" Fill="{Binding ElementName=MainApplication, Path=NextPlayerBrush, Mode=OneWay}"/>
+        <TextBlock Grid.Row="0" Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,8,0"><Bold Foreground="PaleVioletRed">Player 2:</Bold> W(0), D(0), L(0)</TextBlock>
 
-        <ScrollViewer Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+        <ScrollViewer Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Visibility="{Binding ElementName=MainApplication, Path=PlayGridVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
             <Canvas Name="MainScreen">
             </Canvas>
         </ScrollViewer>
+
+        <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Visibility="{Binding ElementName=MainApplication, Path=EndGameScreenVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="2*"/>
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,0,0, 12" FontSize="20" Text="{Binding ElementName=MainApplication, Path=EndGameScreenText}"/>
+            <Button Grid.Row="2" Width="120" Click="NewGameButton_OnClick">New Game</Button>
+        </Grid>
     </Grid>
 </Window>

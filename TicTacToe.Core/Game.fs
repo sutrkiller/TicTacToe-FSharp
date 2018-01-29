@@ -23,6 +23,8 @@ module Matrix =
             true
 
 module Basic =
+    open System.Runtime.InteropServices
+
     [<Struct>]
     type Position = {X:int; Y:int} with
         member this.Coordinates = 
@@ -94,12 +96,17 @@ module Basic =
         | Winner of Player
         | Draw
         | NextTurn
+        member this.TryWinner([<Out>]player:Player byref) =
+            match this with
+            | Winner(p) -> player <- p; true
+            | _ -> false
 
     
     type Game(width:int, heigth:int) =
         let _playGrid:PlayGrid = new PlayGrid(width, heigth)
         let mutable _turns = 0
         let mutable _currentPlayer = PlayerOne
+        let mutable _result = None
         let mutable _possibleMoves = Set.ofSeq [ for yIndex in 0..heigth do for xIndex in 0..width -> {X = xIndex; Y = yIndex}]
 
         let NextPlayer() =
@@ -107,14 +114,20 @@ module Basic =
             | PlayerOne -> PlayerTwo
             | PlayerTwo -> PlayerOne
 
-        ////TODO: move elsewhere
-        //let CompareArrays(first:byte[,]) (second:byte[,]):bool =
-        //    let firstSeq = first |> Seq.cast<byte>
-        //    let secondSeq = second |> Seq.cast<byte>
-        //    Seq.fold2 (fun acc el1 el2 -> acc && (not (el1 <> el2))) true firstSeq secondSeq
+        member private this.GameResultPlayerOne() =
+            match this.MatchFirstPattern ArrayPatterns.Winning with
+            | Some(_) -> Winner(PlayerOne)
+            | None -> if _possibleMoves.IsEmpty then Draw else NextTurn 
 
-        let GameResult() =
-            NextTurn
+        member private this.GameResultPlayerTwo() =
+            match this.MatchFirstPatternFlipPlayer ArrayPatterns.Winning with
+            | Some(_) -> Winner(PlayerTwo)
+            | None -> if _possibleMoves.IsEmpty then Draw else NextTurn
+
+        member private this.GameResult(lastPlayer:Player) =
+            match lastPlayer with
+            | PlayerOne -> this.GameResultPlayerOne()
+            | PlayerTwo -> this.GameResultPlayerTwo()
 
         member this.Grid with get() = _playGrid
         member this.Turns with get() = _turns
@@ -132,7 +145,15 @@ module Basic =
                 | 0 -> newMoves
                 | _ -> Set.union (_possibleMoves.Remove(position)) newMoves
             _turns <- _turns + 1
+            let result = this.GameResult(_currentPlayer)
             _currentPlayer <- NextPlayer()
+            match result with
+            | Winner(_) | Draw -> 
+                _possibleMoves <- Set.empty
+                _result <- Some(result)
+                printfn "Result: %A" result
+            | _ -> ()
+            result
             //TODO: return Winner, Draw, NextTurn
 
 
@@ -175,8 +196,16 @@ module Basic =
         member this.MatchFirstFlipPlayer(pattern:byte[,]) =
             this.MatchFirstPosition pattern this.MatchFlipPlayer
 
-        member private this.MatchFirstPattern (patterns:byte[,] list) (matchFirstPosition:byte[,]->Position option) =
+        member private this.FirstMatchingPattern (patterns:byte[,] list) (matchFirstPosition:byte[,]->Position option) =
             List.tryFind(fun pattern -> (matchFirstPosition pattern).IsSome) patterns
 
+        member this.MatchFirstPatternExact(patterns:byte[,] list) =
+            this.FirstMatchingPattern patterns this.MatchFirstExact
+
+        member this.MatchFirstPattern(patterns:byte[,] list) =
+            this.FirstMatchingPattern patterns this.MatchFirst
+
+        member this.MatchFirstPatternFlipPlayer(patterns:byte[,] list) =
+            this.FirstMatchingPattern patterns this.MatchFirstFlipPlayer
 
         

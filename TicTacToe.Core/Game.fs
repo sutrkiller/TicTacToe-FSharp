@@ -3,24 +3,27 @@ namespace TicTacToe.Core
 [<AutoOpen>]
 module Matrix =
     type Matcher private () =
-        static member CompareArraysExact(first:byte[,]) (second:byte[,]):bool =
-            let firstSeq = first |> Seq.cast<byte>
-            let secondSeq = second |> Seq.cast<byte>
-            Seq.fold2 (fun acc el1 el2 -> acc && el1=el2) true firstSeq secondSeq
+        static member CompareArrays(first:byte[,], second:byte[,], ?ignoredValues: byte array) =
+            let ignored = defaultArg ignoredValues [||]
+            let firstSequence = first |> Seq.cast<byte>
+            let secondSequence = second |> Seq.cast<byte>
+            Seq.fold2 (fun acc el1 el2 -> acc && (Array.contains el1 ignored || el1 = el2)) true firstSequence secondSequence
 
-        static member CompareArrays (ignoredValues:byte array) (first:byte[,]) (second:byte[,]):bool =
-            let firstSeq = first |> Seq.cast<byte>
-            let secondSeq = second |> Seq.cast<byte>
-            Seq.fold2 (fun acc el1 el2 -> acc && (Array.contains el1 ignoredValues || el1=el2)) true firstSeq secondSeq
+        static member MatchArrays(first:byte[,], second:byte[,], ?ignoredValues: byte array) =
+            let ignored = defaultArg ignoredValues [||]
+            let result = Matcher.CompareArrays(first, second, ignored)
 
-        static member CompareArraysChangeValue (changePatternElement:byte -> byte) (first:byte[,]) (second:byte[,]):bool =
-            let firstSeq = first |> Seq.cast<byte>
-            let secondSeq = second |> Seq.cast<byte>
-            Seq.fold2 (fun acc el1 el2 -> acc && changePatternElement el1=el2) true firstSeq secondSeq
-
-
-        static member Match() =
-            true
+            let width = first.GetLength 1;
+            match result with
+            | true ->
+                first
+                |> Seq.cast<byte>
+                |> Seq.mapi (fun i el -> (i, el))
+                |> Seq.where (fun (_, el) -> not (Array.contains el ignored))
+                |> Seq.map (fun (i, _) -> (i % width, i / width))
+                |> Array.ofSeq
+                |> Some
+            | _ -> None
 
 module Basic =
     open System.Runtime.InteropServices
@@ -91,14 +94,50 @@ module Basic =
         member this.AsByteArray():byte[,] = 
             Array2D.init this.Height this.Width (fun y x -> byte this.Grid.[y, x])
 
+        member this.GetSlice(x:int, y:int, width: int, height:int) =
+            this.AsByteArray().[y..y + height-1, x..x + width-1]
+
+        member this.IsMatch(pattern: byte[,], position: Position, ignoreEmpty: bool) =
+            let ignoredValues = if ignoreEmpty then [|0uy|] else [||]
+            let struct (X, Y) = position.Coordinates
+            let slice = this.GetSlice(X, Y, pattern.GetLength 1, pattern.GetLength 0)
+            Matcher.CompareArrays(pattern, slice, ignoredValues)
+
+        member this.Match(pattern: byte[,], position: Position, ignoreEmpty: bool) =
+            let ignoredValues = if ignoreEmpty then [|0uy|] else [||]
+            let struct (X, Y) = position.Coordinates
+            let slice = this.GetSlice(X, Y, pattern.GetLength 1, pattern.GetLength 0)
+            match Matcher.MatchArrays(pattern, slice, ignoredValues) with
+            | Some(array) -> array |> Array.map (fun (x, y) -> {X = x + X; Y = y + Y}) |> Some
+            | _ -> None
+
+        member this.TryFind(pattern: byte[,], ignoreEmpty: bool) =
+            let patternWidth = pattern.GetLength 1
+            let patternHeight = pattern.GetLength 0
+            let positions = Array.ofSeq [for yIndex in 0..this.Height - patternHeight do for xIndex in 0..this.Width - patternWidth -> {X = xIndex; Y = yIndex}]
+            Array.tryFind(fun position -> this.IsMatch(pattern, position, ignoreEmpty)) positions
+
+        member this.TryFindAny(patterns: byte[,] list, ignoreEmpty: bool) =
+            List.tryFind(fun pattern -> this.TryFind(pattern, ignoreEmpty).IsSome) patterns
+
+        member this.FindAny(patterns: byte[,] list, ignoreEmpty: bool) =
+            match this.TryFindAny(patterns, ignoreEmpty) with
+            | Some(pattern) -> 
+                match this.TryFind(pattern, ignoreEmpty) with
+                | Some(position) -> 
+                    match this.Match(pattern, position, ignoreEmpty) with
+                    | Some(matches) -> Some(pattern, position, matches)
+                    | _ -> None
+                | _ -> None
+            | _ -> None
 
     type TurnResult =
-        | Winner of Player
+        | Winner of player:Player*positions:Position array
         | Draw
         | NextTurn
-        member this.TryWinner([<Out>]player:Player byref) =
+        member this.TryWinner([<Out>]player:Player byref, [<Out>]positions: Position array byref) =
             match this with
-            | Winner(p) -> player <- p; true
+            | Winner(pl, pos) -> player <- pl; positions <- pos; true
             | _ -> false
 
     
@@ -107,32 +146,33 @@ module Basic =
         let mutable _turns = 0
         let mutable _currentPlayer = PlayerOne
         let mutable _result = None
-        let mutable _possibleMoves = Set.ofSeq [ for yIndex in 0..heigth do for xIndex in 0..width -> {X = xIndex; Y = yIndex}]
+        let mutable _possibleMoves = Set.ofSeq [ for yIndex in 0..heigth - 1 do for xIndex in 0..width - 1 -> {X = xIndex; Y = yIndex}]
 
         let NextPlayer() =
             match _currentPlayer with
             | PlayerOne -> PlayerTwo
             | PlayerTwo -> PlayerOne
 
+        member this.Grid with get() = _playGrid
+        member this.Turns with get() = _turns
+        member this.CurrentPlayer with get() = _currentPlayer
+        member this.PossibleMoves with get() = _possibleMoves
+
         member private this.GameResultPlayerOne() =
-            match this.MatchFirstPattern ArrayPatterns.Winning with
-            | Some(_) -> Winner(PlayerOne)
+            match this.Grid.FindAny(ArrayPatterns.Winning, true) with
+            | Some(_, _, positions) -> Winner(PlayerOne, positions)
             | None -> if _possibleMoves.IsEmpty then Draw else NextTurn 
 
         member private this.GameResultPlayerTwo() =
-            match this.MatchFirstPatternFlipPlayer ArrayPatterns.Winning with
-            | Some(_) -> Winner(PlayerTwo)
+            let patternsForSecondPlayer = ArrayPatterns.Winning |> List.map ArrayPatterns.SwitchToSecondPlayer
+            match this.Grid.FindAny(patternsForSecondPlayer, true) with
+            | Some(_, _, positions) -> Winner(PlayerTwo, positions)
             | None -> if _possibleMoves.IsEmpty then Draw else NextTurn
 
         member private this.GameResult(lastPlayer:Player) =
             match lastPlayer with
             | PlayerOne -> this.GameResultPlayerOne()
             | PlayerTwo -> this.GameResultPlayerTwo()
-
-        member this.Grid with get() = _playGrid
-        member this.Turns with get() = _turns
-        member this.CurrentPlayer with get() = _currentPlayer
-        member this.PossibleMoves with get() = _possibleMoves
 
         member this.CanPlayMove (position:Position) =
             _possibleMoves.Contains position
@@ -151,61 +191,7 @@ module Basic =
             | Winner(_) | Draw -> 
                 _possibleMoves <- Set.empty
                 _result <- Some(result)
-                printfn "Result: %A" result
             | _ -> ()
             result
-            //TODO: return Winner, Draw, NextTurn
-
-
-
-        //TODO: move elsewhere
-        member private this.FlipPlayer (value:byte) =
-            match value with
-            | 1uy -> 2uy
-            | 2uy -> 1uy
-            | other -> other
-
-        member private this.MatchOnPosition(pattern:byte[,]) (fromPosition:Position) (compare:(byte[,] -> byte[,]->bool)) = 
-            let patternWidth = pattern.GetLength 1
-            let patternHeight = pattern.GetLength 0
-            let struct(X, Y) = fromPosition.Coordinates
-            let slice = this.Grid.AsByteArray().[Y..Y + patternHeight-1, X..X + patternWidth-1]
-            compare pattern slice
-
-        member this.MatchExact(pattern:byte[,]) (fromPosition:Position) =
-            this.MatchOnPosition pattern fromPosition Matcher.CompareArraysExact
-
-        member this.Match(pattern:byte[,]) (fromPosition:Position) =
-            this.MatchOnPosition pattern fromPosition (Matcher.CompareArrays [|0uy|])
-
-        member this.MatchFlipPlayer(pattern:byte[,]) (fromPosition:Position) =
-            this.MatchOnPosition pattern fromPosition (Matcher.CompareArraysChangeValue this.FlipPlayer)
-
-        member private this.MatchFirstPosition(pattern:byte[,]) (matchOnPosition:(byte[,] -> Position -> bool)) =
-            let patternWidth = pattern.GetLength 1
-            let patternHeight = pattern.GetLength 0
-            let positions = Array.ofSeq [for yIndex in 0..this.Grid.Height - patternHeight - 1 do for xIndex in 0..this.Grid.Width-patternWidth-1 -> {X = xIndex; Y = yIndex}]
-            Array.tryFind(fun pos -> matchOnPosition pattern pos) positions
-
-        member this.MatchFirstExact(pattern:byte[,]) =
-            this.MatchFirstPosition pattern this.MatchExact
-
-        member this.MatchFirst(pattern:byte[,]) =
-            this.MatchFirstPosition pattern this.Match
-
-        member this.MatchFirstFlipPlayer(pattern:byte[,]) =
-            this.MatchFirstPosition pattern this.MatchFlipPlayer
-
-        member private this.FirstMatchingPattern (patterns:byte[,] list) (matchFirstPosition:byte[,]->Position option) =
-            List.tryFind(fun pattern -> (matchFirstPosition pattern).IsSome) patterns
-
-        member this.MatchFirstPatternExact(patterns:byte[,] list) =
-            this.FirstMatchingPattern patterns this.MatchFirstExact
-
-        member this.MatchFirstPattern(patterns:byte[,] list) =
-            this.FirstMatchingPattern patterns this.MatchFirst
-
-        member this.MatchFirstPatternFlipPlayer(patterns:byte[,] list) =
-            this.FirstMatchingPattern patterns this.MatchFirstFlipPlayer
 
         
